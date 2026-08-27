@@ -2,7 +2,7 @@
 NYC Waste Classifier - webcam scanner prototype.
 
 Opens a webcam feed with a central 400x400 targeting box. Pressing SPACE/'c'
-captures the ROI and sends it to Gemini 2.5 Flash for classification against
+captures the ROI and sends it to Gemini 3.6 Flash for classification against
 NYC DSNY / 311 recycling rules (KA-02013). The result is printed to stdout
 and saved to classified_item.json.
 
@@ -18,7 +18,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
 
 import cv2
 from PIL import Image
@@ -53,7 +52,6 @@ class NYCWasteClassification(BaseModel):
     is_recyclable: bool
     preparation_instructions: list[str]
     nyc_rule_notes: str
-    estimated_weight_grams: float
 
 
 # ---------------------------------------------------------------------------
@@ -84,16 +82,7 @@ collection streams, and be strict about the following routing rules:
   take-back programs rather than curbside pickup.
 
 Always pick the single best-fitting category and bin color based on these
-rules.
-
-Also provide estimated_weight_grams: a rough estimate of the item's weight in
-grams, based on its apparent material, size, and typical weight for that kind
-of object. The image gives no scale reference or depth information, so this
-is an approximation, not a measurement - use your best judgment from common
-knowledge of similar objects (e.g. an empty aluminum can is roughly 15g, a
-plastic water bottle roughly 20-30g).
-
-Respond only with data matching the required JSON schema.
+rules. Respond only with data matching the required JSON schema.
 """
 
 # ---------------------------------------------------------------------------
@@ -128,9 +117,7 @@ def classify_image(pil_image: Image.Image) -> NYCWasteClassification | None:
         if result is None:
             result = NYCWasteClassification.model_validate_json(response.text)
 
-        output = result.model_dump()
-        output["captured_at"] = datetime.now().isoformat()
-        payload = json.dumps(output, indent=2)
+        payload = result.model_dump_json(indent=2)
         print("\n" + payload + "\n")
 
         with open("classified_item.json", "w", encoding="utf-8") as f:
