@@ -47,13 +47,17 @@ Everything lives in `scanner_prototype.py`, structured in this order:
 1. **Env check** — fails fast if `GEMINI_API_KEY` is missing.
 2. **`NYCWasteClassification`** (Pydantic model) — the structured output schema Gemini is forced to
    return: `item_name`, `material_type`, `nyc_stream_category`, `bin_color`, `is_recyclable`,
-   `preparation_instructions`, `nyc_rule_notes`.
+   `preparation_instructions`, `nyc_rule_notes`, `estimated_weight_grams`. The weight field is a rough
+   LLM visual estimate (no scale or size reference exists in a single webcam frame), not a real
+   measurement — treat it as approximate.
 3. **`SYSTEM_INSTRUCTION`** — encodes the actual NYC bin-routing rules (blue/green/brown/black/special
    disposal categories and their edge cases, e.g. plastic film and styrofoam are trash despite being
-   plastic). This prompt *is* the business logic — changes to sorting rules go here, not in code.
+   plastic), plus guidance for the weight estimate. This prompt *is* the business logic — changes to
+   sorting rules go here, not in code.
 4. **`classify_image()`** — sends a PIL image to `gemini-3.6-flash` with the schema + system
-   instruction, writes the result to `classified_item.json`, and deliberately catches all exceptions
-   so an API/network failure never crashes the live video loop.
+   instruction, adds a `captured_at` timestamp (from the local clock, not Gemini) to the output, writes
+   the result to `classified_item.json`, and deliberately catches all exceptions so an API/network
+   failure never crashes the live video loop.
 5. **Scanner loop (`main`)** — manual capture only: SPACE/`c` triggers capture of the current ROI; the
    box flashes green briefly after capture, otherwise stays red. Auto-capture on stillness (motion
    detection, a still timer) is planned but not yet implemented — keep this loop simple until that's
