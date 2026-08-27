@@ -1,60 +1,65 @@
-import { BarChart3, Leaf, History, Trash2, Recycle } from "lucide-react";
-import { DashboardStats as StatsType, HistoryLog } from "../types";
+import React from "react";
+import { X, Recycle, Leaf, Trash2, History } from "lucide-react";
+import { HistoryLog } from "../types";
 
-interface DashboardStatsProps {
-  stats: StatsType;
-  chartData: number[];
-  recentHistory: HistoryLog[];
-  onViewAll: () => void; // New prop added
+interface HistoryModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  history: HistoryLog[];
 }
 
-export default function DashboardStats({ stats, chartData, recentHistory, onViewAll }: DashboardStatsProps) {
-  return (
-    <section className="lg:col-span-5 flex flex-col gap-6">
-      
-      {/* ... [Keep Top Metrics and Chart code exactly the same] ... */}
+export default function HistoryModal({ isOpen, onClose, history }: HistoryModalProps) {
+  if (!isOpen) return null;
 
-      {/* Recent Logs Feed */}
-      <div className="p-6 rounded-3xl bg-zinc-900 border border-zinc-800 flex-1 flex flex-col">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-lg flex items-center gap-2">
-            <History className="w-5 h-5 text-zinc-400" />
-            Recent Logs
-          </h3>
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        
+        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <History className="w-5 h-5 text-emerald-500" />
+            Full Scan History
+          </h2>
           <button 
-            onClick={onViewAll}
-            className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
+            onClick={onClose} 
+            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-full transition-colors"
           >
-            View All
+            <X className="w-5 h-5" />
           </button>
         </div>
-        
-        <div className="space-y-4 overflow-y-auto max-h-[300px]">
-          {/* Slice the array to only show the first 4 items on the dashboard */}
-          {recentHistory.slice(0, 4).map((log) => (
-            <div key={log.id} className="flex items-center justify-between p-3 rounded-2xl bg-zinc-950/50 hover:bg-zinc-800/50 transition-colors border border-zinc-800/30">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-xl ${
-                  log.category === 'Recycle' ? 'bg-blue-500/20 text-blue-400' : 
-                  log.category === 'Compost' ? 'bg-amber-500/20 text-amber-400' : 
-                  'bg-zinc-800 text-zinc-400'
-                }`}>
-                  {log.category === 'Recycle' ? <Recycle className="w-4 h-4"/> : 
-                   log.category === 'Compost' ? <Leaf className="w-4 h-4"/> : 
-                   <Trash2 className="w-4 h-4"/>}
+
+        <div className="p-6 overflow-y-auto flex-1 space-y-4">
+          {(!history || history.length === 0) ? (
+            <p className="text-center text-zinc-500 py-8">No items scanned yet.</p>
+          ) : (
+            history.map((log) => (
+              <div key={log.id} className="flex items-center justify-between p-4 rounded-2xl bg-zinc-950/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors">
+                <div className="flex items-center gap-4">
+                  <div className={`p-3 rounded-xl ${
+                    log.category === 'Recycle' ? 'bg-blue-500/20 text-blue-400' : 
+                    log.category === 'Compost' ? 'bg-amber-500/20 text-amber-400' : 
+                    'bg-zinc-800 text-zinc-400'
+                  }`}>
+                    {log.category === 'Recycle' ? <Recycle className="w-5 h-5"/> : 
+                     log.category === 'Compost' ? <Leaf className="w-5 h-5"/> : 
+                     <Trash2 className="w-5 h-5"/>}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-zinc-200">{log.item}</p>
+                    <p className="text-sm text-zinc-500">{log.time}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-medium text-sm text-zinc-200">{log.item}</p>
-                  <p className="text-xs text-zinc-500">{log.time}</p>
+                <div className="text-right">
+                  <span className={`text-sm font-bold ${log.co2 !== "0.00" ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {log.co2 !== "0.00" ? `${log.co2} kg CO₂` : "0 kg CO₂"}
+                  </span>
+                  <p className="text-xs text-zinc-500 mt-0.5">{log.category}</p>
                 </div>
               </div>
-              <span className={`text-sm font-semibold ${log.co2 !== "0.00" ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                {log.co2 !== "0.00" ? `${log.co2} kg` : "0 kg"}
-              </span>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
-    </section>
+    </div>
   );
 }

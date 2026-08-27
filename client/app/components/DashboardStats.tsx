@@ -5,16 +5,17 @@ interface DashboardStatsProps {
   stats: StatsType;
   chartData: number[];
   recentHistory: HistoryLog[];
+  onViewAll: () => void; 
 }
 
-export default function DashboardStats({ stats, chartData, recentHistory }: DashboardStatsProps) {
+export default function DashboardStats({ stats, chartData, recentHistory, onViewAll }: DashboardStatsProps) {
   return (
     <section className="lg:col-span-5 flex flex-col gap-6">
       
       {/* Top Metrics Cards */}
       <div className="grid grid-cols-2 gap-4">
         
-        {/* Updated CO2 Diverted Card */}
+        {/* CO2 Diverted Card */}
         <div className="p-5 rounded-3xl bg-zinc-900 border border-zinc-800">
           <div className="flex items-center gap-2 text-zinc-400 mb-2">
             <Leaf className="w-4 h-4 text-emerald-500" />
@@ -56,13 +57,23 @@ export default function DashboardStats({ stats, chartData, recentHistory }: Dash
       </div>
 
       {/* Recent Logs Feed */}
-      <div className="p-6 rounded-3xl bg-zinc-900 border border-zinc-800 flex-1 overflow-y-auto max-h-[300px]">
-        <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-          <History className="w-5 h-5 text-zinc-400" />
-          Recent Logs
-        </h3>
-        <div className="space-y-4">
-          {recentHistory.map((log) => (
+      <div className="p-6 rounded-3xl bg-zinc-900 border border-zinc-800 flex-1 flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-lg flex items-center gap-2">
+            <History className="w-5 h-5 text-zinc-400" />
+            Recent Logs
+          </h3>
+          <button 
+            onClick={onViewAll}
+            className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
+          >
+            View All
+          </button>
+        </div>
+        
+        <div className="space-y-4 overflow-y-auto max-h-[300px]">
+          {/* Safe slice implementation to prevent undefined errors */}
+          {(recentHistory || []).slice(0, 4).map((log) => (
             <div key={log.id} className="flex items-center justify-between p-3 rounded-2xl bg-zinc-950/50 hover:bg-zinc-800/50 transition-colors border border-zinc-800/30">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-xl ${
