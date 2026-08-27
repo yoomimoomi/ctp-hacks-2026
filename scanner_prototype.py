@@ -19,6 +19,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 
 import cv2
 from PIL import Image
@@ -53,6 +54,8 @@ class NYCWasteClassification(BaseModel):
     is_recyclable: bool
     preparation_instructions: list[str]
     nyc_rule_notes: str
+    estimated_weight_grams: float
+    captured_at: str
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +86,16 @@ collection streams, and be strict about the following routing rules:
   take-back programs rather than curbside pickup.
 
 Always pick the single best-fitting category and bin color based on these
-rules. Respond only with data matching the required JSON schema.
+rules.
+
+For estimated_weight_grams, give your best rough visual estimate of the
+item's weight in grams based on its apparent size and material - there is no
+scale or size reference in the frame, so treat this as approximate.
+
+For captured_at, put any placeholder string - it will be overwritten with
+the actual capture timestamp and is not used from your response.
+
+Respond only with data matching the required JSON schema.
 """
 
 # ---------------------------------------------------------------------------
@@ -122,6 +134,9 @@ def classify_image(pil_image: Image.Image) -> NYCWasteClassification | None:
         result = response.parsed
         if result is None:
             result = NYCWasteClassification.model_validate_json(response.text)
+
+        # captured_at comes from the local clock, not Gemini's guess.
+        result = result.model_copy(update={"captured_at": datetime.now().isoformat()})
 
         payload = result.model_dump_json(indent=2)
         print("\n" + payload + "\n")
