@@ -1,26 +1,24 @@
 """
-NYC Waste Classifier - webcam scanner prototype.
+NYC Waste Classifier - classification backend.
 
-Opens a webcam feed with a central 400x400 targeting box. Pressing SPACE/'c'
-captures the ROI and sends it to Gemini 3.6 Flash for classification against
-NYC DSNY / 311 recycling rules (KA-02013). The result is printed to stdout
-and saved to classified_item.json.
+A FastAPI app exposing POST /classify: accepts an uploaded image, sends it to
+Gemini 3.6 Flash for structured classification against NYC DSNY / 311
+recycling rules (KA-02013), and returns the classification as JSON for the
+frontend to consume. The result is also written to classified_item.json.
 
-Manual capture only for now; auto-capture on stillness will be added later.
-
-Controls:
-    SPACE or 'c' - capture
-    'q'          - quit
+Run with:
+    uvicorn scanner_prototype:app --reload
+or:
+    python scanner_prototype.py
 """
 
 import io
-import json
 import os
 import sys
-import threading
-import time
+from datetime import datetime
 
-import cv2
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from pydantic import BaseModel
 
@@ -53,6 +51,9 @@ class NYCWasteClassification(BaseModel):
     is_recyclable: bool
     preparation_instructions: list[str]
     nyc_rule_notes: str
+    estimated_weight_grams: float
+    estimated_co2_grams: float
+    captured_at: str
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +84,22 @@ collection streams, and be strict about the following routing rules:
   take-back programs rather than curbside pickup.
 
 Always pick the single best-fitting category and bin color based on these
-rules. Respond only with data matching the required JSON schema.
+rules.
+
+For estimated_weight_grams, give your best rough visual estimate of the
+item's weight in grams based on its apparent size and material - there is no
+scale or size reference in the frame, so treat this as approximate.
+
+For estimated_co2_grams, give your best rough estimate of the item's carbon
+footprint in grams of CO2-equivalent (embodied production plus disposal),
+based on its material_type and your estimated_weight_grams - this is an
+approximation for a rough per-item carbon footprint calculation, not a
+citation of a specific lifecycle-assessment dataset.
+
+For captured_at, put any placeholder string - it will be overwritten with
+the actual capture timestamp and is not used from your response.
+
+Respond only with data matching the required JSON schema.
 """
 
 # ---------------------------------------------------------------------------
@@ -97,139 +113,72 @@ client = genai.Client()
 # ---------------------------------------------------------------------------
 
 
-def classify_image(pil_image: Image.Image) -> NYCWasteClassification | None:
-    """Send a cropped ROI image to Gemini and return a validated classification.
+def classify_image(pil_image: Image.Image) -> NYCWasteClassification:
+    """Send an image to Gemini and return a validated classification.
 
-    Returns None (and prints an error) instead of raising, so a network or
-    API failure never crashes the live video loop.
+    Raises on API/network/validation failure - the caller (the /classify
+    endpoint) is responsible for turning that into an HTTP error response.
     """
-    try:
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=[pil_image],
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                response_mime_type="application/json",
-                response_schema=NYCWasteClassification,
-                # This is pure structured extraction, not reasoning - minimize
-                # the model's internal thinking pass to cut round-trip latency.
-                # thinking_budget=0 is rejected by gemini-3.6-flash (400), so
-                # use the lowest supported thinking_level instead.
-                thinking_config=types.ThinkingConfig(thinking_level="low"),
-            ),
-        )
+    response = client.models.generate_content(
+        model="gemini-3.6-flash",
+        contents=[pil_image],
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            response_mime_type="application/json",
+            response_schema=NYCWasteClassification,
+            # This is pure structured extraction, not reasoning - minimize
+            # the model's internal thinking pass to cut round-trip latency.
+            # thinking_budget=0 is rejected by gemini-3.6-flash (400), so
+            # use the lowest supported thinking_level instead.
+            thinking_config=types.ThinkingConfig(thinking_level="low"),
+        ),
+    )
 
-        result = response.parsed
-        if result is None:
-            result = NYCWasteClassification.model_validate_json(response.text)
+    result = response.parsed
+    if result is None:
+        result = NYCWasteClassification.model_validate_json(response.text)
 
-        payload = result.model_dump_json(indent=2)
-        print("\n" + payload + "\n")
+    # captured_at comes from the local clock, not Gemini's guess.
+    result = result.model_copy(update={"captured_at": datetime.now().isoformat()})
 
-        with open("classified_item.json", "w", encoding="utf-8") as f:
-            f.write(payload)
+    payload = result.model_dump_json(indent=2)
+    print("\n" + payload + "\n")
 
-        return result
+    with open("classified_item.json", "w", encoding="utf-8") as f:
+        f.write(payload)
 
-    except Exception as exc:  # noqa: BLE001 - deliberately broad to protect the video loop
-        print(f"\n[ERROR] Classification failed: {exc}\n")
-        return None
+    return result
 
 
 # ---------------------------------------------------------------------------
-# Scanner loop
+# HTTP API
 # ---------------------------------------------------------------------------
 
-ROI_SIZE = 400
-# Downscale the captured ROI before sending to Gemini - classification doesn't
-# need full ROI_SIZE detail, and the smaller payload uploads/encodes faster.
-CAPTURE_SIZE = 256
+app = FastAPI()
 
-RED = (0, 0, 255)
-GREEN = (0, 255, 0)
-YELLOW = (0, 255, 255)
-
-
-def get_roi_bounds(frame_width: int, frame_height: int) -> tuple[int, int, int, int]:
-    x1 = frame_width // 2 - ROI_SIZE // 2
-    y1 = frame_height // 2 - ROI_SIZE // 2
-    x2 = x1 + ROI_SIZE
-    y2 = y1 + ROI_SIZE
-    return x1, y1, x2, y2
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-def classify_image_async(pil_image: Image.Image, state: dict) -> None:
-    """Run classify_image() off the main thread so the video loop keeps rendering."""
+@app.post("/classify", response_model=NYCWasteClassification)
+async def classify(file: UploadFile = File(...)) -> NYCWasteClassification:
+    data = await file.read()
     try:
-        classify_image(pil_image)
-    finally:
-        state["busy"] = False
-        state["flash_until"] = time.time() + 0.4
-
-
-def main() -> None:
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("ERROR: could not open webcam (device index 0).")
-        sys.exit(1)
-
-    state = {"busy": False, "flash_until": 0.0}
-
-    print("NYC Waste Classifier scanner running. Press SPACE/'c' to capture, 'q' to quit.")
+        pil_image = Image.open(io.BytesIO(data)).convert("RGB")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid image: {exc}") from exc
 
     try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                print("ERROR: failed to read frame from webcam.")
-                break
-
-            frame = cv2.flip(frame, 1)
-            h, w = frame.shape[:2]
-            x1, y1, x2, y2 = get_roi_bounds(w, h)
-            roi = frame[y1:y2, x1:x2]
-
-            now = time.time()
-
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                break
-            triggered = (key == 32 or key == ord("c")) and not state["busy"]
-
-            if state["busy"]:
-                box_color = YELLOW
-                label = "Classifying..."
-            elif now < state["flash_until"] or triggered:
-                box_color = GREEN
-                label = "Captured!"
-            else:
-                box_color = RED
-                label = "Align item inside box, press SPACE to capture"
-
-            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 3)
-            cv2.putText(
-                frame, label, (x1, y1 - 12),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, box_color, 2, cv2.LINE_AA,
-            )
-
-            cv2.imshow("NYC Waste Classifier", frame)
-
-            if triggered:
-                state["busy"] = True
-
-                roi_resized = cv2.resize(
-                    roi, (CAPTURE_SIZE, CAPTURE_SIZE), interpolation=cv2.INTER_AREA
-                )
-                rgb_roi = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2RGB)
-                pil_image = Image.fromarray(rgb_roi)
-                threading.Thread(
-                    target=classify_image_async, args=(pil_image, state), daemon=True
-                ).start()
-
-    finally:
-        cap.release()
-        cv2.destroyAllWindows()
+        return classify_image(pil_image)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Classification failed: {exc}") from exc
 
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,4 +1,6 @@
-opencv-python
+fastapi
+uvicorn[standard]
+python-multipart
 google-genai
 pydantic
 pillow
