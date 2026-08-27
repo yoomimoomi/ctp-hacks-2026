@@ -120,7 +120,7 @@ def classify_image(pil_image: Image.Image) -> NYCWasteClassification:
     endpoint) is responsible for turning that into an HTTP error response.
     """
     response = client.models.generate_content(
-        model="gemini-3.6-flash",
+        model="gemini-3.5-flash-lite",
         contents=[pil_image],
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
@@ -128,7 +128,7 @@ def classify_image(pil_image: Image.Image) -> NYCWasteClassification:
             response_schema=NYCWasteClassification,
             # This is pure structured extraction, not reasoning - minimize
             # the model's internal thinking pass to cut round-trip latency.
-            # thinking_budget=0 is rejected by gemini-3.6-flash (400), so
+            # thinking_budget=0 is rejected by some Gemini models (400), so
             # use the lowest supported thinking_level instead.
             thinking_config=types.ThinkingConfig(thinking_level="low"),
         ),

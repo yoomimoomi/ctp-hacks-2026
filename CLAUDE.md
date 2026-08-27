@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A single-file classification backend (`scanner_prototype.py`) that classifies items against NYC
 DSNY/311 curbside recycling rules (article KA-02013). It's a FastAPI app exposing `POST /classify`:
 the frontend uploads an image (captured client-side, e.g. from a browser webcam), the image is sent
-to Gemini 3.6 Flash for structured classification, and the result is returned as JSON in the HTTP
+to Gemini 3.5 Flash-Lite for structured classification, and the result is returned as JSON in the HTTP
 response (and also written to `classified_item.json` as a local debug artifact).
 
 ## Setup and running
@@ -65,7 +65,7 @@ Everything lives in `scanner_prototype.py`, structured in this order:
    disposal categories and their edge cases, e.g. plastic film and styrofoam are trash despite being
    plastic), plus guidance for the weight and CO2 estimates. This prompt *is* the business logic —
    changes to sorting rules go here, not in code.
-4. **`classify_image()`** — sends a PIL image to `gemini-3.6-flash` with the schema + system
+4. **`classify_image()`** — sends a PIL image to `gemini-3.5-flash-lite` with the schema + system
    instruction, adds a `captured_at` timestamp (from the local clock, not Gemini) to the output, and
    writes the result to `classified_item.json`. It lets exceptions propagate — the FastAPI endpoint
    is responsible for turning API/network/validation failures into an HTTP error response.

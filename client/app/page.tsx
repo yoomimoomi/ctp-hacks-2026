@@ -9,7 +9,10 @@ import { VisionAPIResponse, ExtendedScanResult, HistoryLog, DashboardStats as St
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-type AnalyzeScanResponse = VisionAPIResponse & { model?: string };
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
 
 export default function EcoDashboard() {
   const [isScanning, setIsScanning] = useState(false);
@@ -35,15 +38,13 @@ export default function EcoDashboard() {
     setScanResult(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/scan/analyze`, {
+      const blob = await dataUrlToBlob(imageSrc);
+      const formData = new FormData();
+      formData.append("file", blob, "snapshot.jpg");
+
+      const response = await fetch(`${API_BASE_URL}/classify`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          image_base64: imageSrc,
-          model: "gemini-1.5-flash",
-        }),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -51,13 +52,14 @@ export default function EcoDashboard() {
         throw new Error(errorData.detail ?? "Scan request failed.");
       }
 
-      const data: AnalyzeScanResponse = await response.json();
+      const data: VisionAPIResponse = await response.json();
 
-      const isRecycle = data.nyc_stream_category.toLowerCase().includes("recycl");
-      const isCompost = data.nyc_stream_category.toLowerCase().includes("compost") || data.nyc_stream_category.toLowerCase().includes("organics");
-      
-      const uiCategory = isRecycle ? "Recycle" : isCompost ? "Compost" : "Trash";
-      const co2Impact = isRecycle ? 0.85 : isCompost ? 0.35 : 0;
+      const category = data.nyc_stream_category.toLowerCase();
+      const isCompost = category.includes("compost") || category.includes("organics");
+      const isRecycle = !isCompost && data.is_recyclable;
+
+      const uiCategory = isCompost ? "Compost" : isRecycle ? "Recycle" : "Trash";
+      const co2Impact = uiCategory === "Trash" ? 0 : Number((data.estimated_co2_grams / 1000).toFixed(2));
 
       setScanResult({
         ...data,

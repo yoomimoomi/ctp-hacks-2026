@@ -6,6 +6,9 @@ export interface VisionAPIResponse {
   is_recyclable: boolean;
   preparation_instructions: string[];
   nyc_rule_notes: string;
+  estimated_weight_grams: number;
+  estimated_co2_grams: number;
+  captured_at: string;
 }
 
 export interface ExtendedScanResult extends VisionAPIResponse {
