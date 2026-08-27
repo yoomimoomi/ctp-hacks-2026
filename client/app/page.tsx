@@ -1,69 +1,133 @@
-import Image from "next/image";
+"use client";
+
+import { FormEvent, useMemo, useState } from "react";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 export default function Home() {
+  const [health, setHealth] = useState("Not checked");
+  const [opencvVersion, setOpenCvVersion] = useState("Not checked");
+  const [prompt, setPrompt] = useState("");
+  const [geminiOutput, setGeminiOutput] = useState("");
+  const [loadingGemini, setLoadingGemini] = useState(false);
+  const [error, setError] = useState("");
+
+  const endpointText = useMemo(() => API_BASE_URL, []);
+
+  async function checkBackend() {
+    setError("");
+    try {
+      const [healthRes, opencvRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/health`),
+        fetch(`${API_BASE_URL}/opencv/version`),
+      ]);
+
+      if (!healthRes.ok) {
+        throw new Error("Health check failed.");
+      }
+      if (!opencvRes.ok) {
+        throw new Error("OpenCV endpoint failed.");
+      }
+
+      const healthData: { status: string } = await healthRes.json();
+      const opencvData: { opencv_version: string } = await opencvRes.json();
+      setHealth(healthData.status);
+      setOpenCvVersion(opencvData.opencv_version);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Unknown error while checking backend.";
+      setError(message);
+    }
+  }
+
+  async function handleGeminiSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setGeminiOutput("");
+
+    if (!prompt.trim()) {
+      setError("Please enter a prompt first.");
+      return;
+    }
+
+    setLoadingGemini(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/gemini/prompt`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt,
+          model: "gemini-1.5-flash",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData: { detail?: string } = await response.json();
+        throw new Error(errorData.detail ?? "Gemini request failed.");
+      }
+
+      const data: { response: string } = await response.json();
+      setGeminiOutput(data.response || "(Empty response)");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Unknown error while calling Gemini.";
+      setError(message);
+    } finally {
+      setLoadingGemini(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-6">
+      <section className="rounded-lg border p-4">
+        <h1 className="text-2xl font-bold">Next.js + FastAPI Connection</h1>
+        <p className="mt-2 text-sm text-zinc-600">
+          Frontend is calling backend at <code>{endpointText}</code>
+        </p>
+      </section>
+
+      <section className="rounded-lg border p-4">
+        <h2 className="text-lg font-semibold">Backend Status</h2>
+        <button
+          className="mt-3 rounded bg-black px-4 py-2 text-white"
+          type="button"
+          onClick={checkBackend}
+        >
+          Check Backend
+        </button>
+        <p className="mt-3 text-sm">Health: {health}</p>
+        <p className="text-sm">OpenCV: {opencvVersion}</p>
+      </section>
+
+      <section className="rounded-lg border p-4">
+        <h2 className="text-lg font-semibold">Gemini Prompt</h2>
+        <form className="mt-3 flex flex-col gap-3" onSubmit={handleGeminiSubmit}>
+          <textarea
+            className="min-h-28 rounded border p-2"
+            placeholder="Type a prompt for Gemini..."
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+          />
+          <button
+            className="w-fit rounded bg-black px-4 py-2 text-white disabled:opacity-60"
+            type="submit"
+            disabled={loadingGemini}
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+            {loadingGemini ? "Sending..." : "Send to Gemini"}
+          </button>
+        </form>
+        <p className="mt-3 whitespace-pre-wrap text-sm">{geminiOutput}</p>
+      </section>
+
+      {error ? (
+        <section className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-700">
+          {error}
+        </section>
+      ) : null}
+    </main>
   );
 }
