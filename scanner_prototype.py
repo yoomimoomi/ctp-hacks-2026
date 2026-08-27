@@ -17,6 +17,7 @@ import io
 import json
 import os
 import sys
+import threading
 import time
 
 import cv2
@@ -110,6 +111,11 @@ def classify_image(pil_image: Image.Image) -> NYCWasteClassification | None:
                 system_instruction=SYSTEM_INSTRUCTION,
                 response_mime_type="application/json",
                 response_schema=NYCWasteClassification,
+                # This is pure structured extraction, not reasoning - minimize
+                # the model's internal thinking pass to cut round-trip latency.
+                # thinking_budget=0 is rejected by gemini-3.6-flash (400), so
+                # use the lowest supported thinking_level instead.
+                thinking_config=types.ThinkingConfig(thinking_level="low"),
             ),
         )
 
@@ -135,9 +141,13 @@ def classify_image(pil_image: Image.Image) -> NYCWasteClassification | None:
 # ---------------------------------------------------------------------------
 
 ROI_SIZE = 400
+# Downscale the captured ROI before sending to Gemini - classification doesn't
+# need full ROI_SIZE detail, and the smaller payload uploads/encodes faster.
+CAPTURE_SIZE = 256
 
 RED = (0, 0, 255)
 GREEN = (0, 255, 0)
+YELLOW = (0, 255, 255)
 
 
 def get_roi_bounds(frame_width: int, frame_height: int) -> tuple[int, int, int, int]:
@@ -148,13 +158,22 @@ def get_roi_bounds(frame_width: int, frame_height: int) -> tuple[int, int, int, 
     return x1, y1, x2, y2
 
 
+def classify_image_async(pil_image: Image.Image, state: dict) -> None:
+    """Run classify_image() off the main thread so the video loop keeps rendering."""
+    try:
+        classify_image(pil_image)
+    finally:
+        state["busy"] = False
+        state["flash_until"] = time.time() + 0.4
+
+
 def main() -> None:
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("ERROR: could not open webcam (device index 0).")
         sys.exit(1)
 
-    flash_until = 0.0
+    state = {"busy": False, "flash_until": 0.0}
 
     print("NYC Waste Classifier scanner running. Press SPACE/'c' to capture, 'q' to quit.")
 
@@ -175,9 +194,12 @@ def main() -> None:
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
-            triggered = key == 32 or key == ord("c")
+            triggered = (key == 32 or key == ord("c")) and not state["busy"]
 
-            if now < flash_until or triggered:
+            if state["busy"]:
+                box_color = YELLOW
+                label = "Classifying..."
+            elif now < state["flash_until"] or triggered:
                 box_color = GREEN
                 label = "Captured!"
             else:
@@ -193,11 +215,16 @@ def main() -> None:
             cv2.imshow("NYC Waste Classifier", frame)
 
             if triggered:
-                flash_until = time.time() + 0.4
+                state["busy"] = True
 
-                rgb_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+                roi_resized = cv2.resize(
+                    roi, (CAPTURE_SIZE, CAPTURE_SIZE), interpolation=cv2.INTER_AREA
+                )
+                rgb_roi = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(rgb_roi)
-                classify_image(pil_image)
+                threading.Thread(
+                    target=classify_image_async, args=(pil_image, state), daemon=True
+                ).start()
 
     finally:
         cap.release()
