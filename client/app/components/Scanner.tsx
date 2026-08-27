@@ -22,7 +22,7 @@ export default function Scanner({ isScanning, onCapture }: ScannerProps) {
   return (
     <div className="relative rounded-3xl bg-zinc-900 border border-zinc-800 overflow-hidden aspect-video flex flex-col items-center justify-center">
       
-      {/* @ts-ignore: react-webcam class types are incompatible with React 19 */}
+      {/* @ts-expect-error: react-webcam class types are incompatible with React 19 */}
       <Webcam
         audio={false}
         ref={webcamRef}

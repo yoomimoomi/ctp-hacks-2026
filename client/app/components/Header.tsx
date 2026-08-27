@@ -14,6 +14,10 @@ export default function Header({ co2Diverted }: HeaderProps) {
         <h1 className="text-2xl font-bold tracking-tight">EcoVision NYC</h1>
       </div>
       <div className="flex items-center gap-4">
+        <div className="hidden sm:block text-right">
+          <p className="text-xs text-zinc-500">CO2 Diverted</p>
+          <p className="text-sm font-semibold text-emerald-400">{co2Diverted.toFixed(2)} kg</p>
+        </div>
         <div className="w-10 h-10 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
           <span className="text-sm font-medium">PC</span>
         </div>

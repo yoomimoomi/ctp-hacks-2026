@@ -32,7 +32,7 @@ export default function ScanResultCard({ scanResult }: ScanResultCardProps) {
         <p className="text-zinc-300">{scanResult.preparation_instructions.join(" ")}</p>
         {scanResult.nyc_rule_notes && (
           <p className="text-sm text-zinc-500 italic bg-zinc-950/50 p-3 rounded-xl border border-zinc-800/50">
-            "{scanResult.nyc_rule_notes}"
+            {scanResult.nyc_rule_notes}
           </p>
         )}
       </div>
