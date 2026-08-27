@@ -1,133 +1,135 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import React, { useState, useCallback } from "react";
+import Header from "./components/Header";
+import Scanner from "./components/Scanner";
+import ScanResultCard from "./components/ScanResultCard";
+import DashboardStats from "./components/DashboardStats";
+import { VisionAPIResponse, ExtendedScanResult, HistoryLog, DashboardStats as StatsType } from "./types";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-export default function Home() {
-  const [health, setHealth] = useState("Not checked");
-  const [opencvVersion, setOpenCvVersion] = useState("Not checked");
-  const [prompt, setPrompt] = useState("");
-  const [geminiOutput, setGeminiOutput] = useState("");
-  const [loadingGemini, setLoadingGemini] = useState(false);
-  const [error, setError] = useState("");
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
 
-  const endpointText = useMemo(() => API_BASE_URL, []);
+export default function EcoDashboard() {
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<ExtendedScanResult | null>(null);
+  const [error, setError] = useState<string>("");
 
-  async function checkBackend() {
+  const [stats, setStats] = useState<StatsType>({
+    totalScans: 142,
+    co2Diverted: 34.5,
+    recycledItems: 110,
+  });
+
+  const [recentHistory, setRecentHistory] = useState<HistoryLog[]>([
+    { id: 1, item: "Aluminum Can", category: "Recycle", co2: "+0.95", time: "2 mins ago" },
+    { id: 2, item: "Banana Peel", category: "Compost", co2: "+0.15", time: "1 hour ago" },
+  ]);
+
+  const [chartData, setChartData] = useState<number[]>([4, 12, 8, 24, 16, 34.5]);
+
+  const handleCapture = useCallback(async (imageSrc: string) => {
+    setIsScanning(true);
     setError("");
-    try {
-      const [healthRes, opencvRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/health`),
-        fetch(`${API_BASE_URL}/opencv/version`),
-      ]);
-
-      if (!healthRes.ok) {
-        throw new Error("Health check failed.");
-      }
-      if (!opencvRes.ok) {
-        throw new Error("OpenCV endpoint failed.");
-      }
-
-      const healthData: { status: string } = await healthRes.json();
-      const opencvData: { opencv_version: string } = await opencvRes.json();
-      setHealth(healthData.status);
-      setOpenCvVersion(opencvData.opencv_version);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Unknown error while checking backend.";
-      setError(message);
-    }
-  }
-
-  async function handleGeminiSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setGeminiOutput("");
-
-    if (!prompt.trim()) {
-      setError("Please enter a prompt first.");
-      return;
-    }
-
-    setLoadingGemini(true);
+    setScanResult(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/gemini/prompt`, {
+      const blob = await dataUrlToBlob(imageSrc);
+      const formData = new FormData();
+      formData.append("file", blob, "snapshot.jpg");
+
+      const response = await fetch(`${API_BASE_URL}/classify`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt,
-          model: "gemini-1.5-flash",
-        }),
+        body: formData,
       });
 
       if (!response.ok) {
         const errorData: { detail?: string } = await response.json();
-        throw new Error(errorData.detail ?? "Gemini request failed.");
+        throw new Error(errorData.detail ?? "Scan request failed.");
       }
 
-      const data: { response: string } = await response.json();
-      setGeminiOutput(data.response || "(Empty response)");
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Unknown error while calling Gemini.";
-      setError(message);
+      const data: VisionAPIResponse = await response.json();
+
+      const category = data.nyc_stream_category.toLowerCase();
+      const isCompost = category.includes("compost") || category.includes("organics");
+      const isRecycle = !isCompost && data.is_recyclable;
+
+      const uiCategory = isCompost ? "Compost" : isRecycle ? "Recycle" : "Trash";
+      const co2Impact = uiCategory === "Trash" ? 0 : Number((data.estimated_co2_grams / 1000).toFixed(2));
+
+      setScanResult({
+        ...data,
+        uiCategory,
+        co2Saved: co2Impact
+      });
+
+      setStats(prev => ({
+        totalScans: prev.totalScans + 1,
+        co2Diverted: Number((prev.co2Diverted + co2Impact).toFixed(2)),
+        recycledItems: isRecycle || isCompost ? prev.recycledItems + 1 : prev.recycledItems
+      }));
+
+      setRecentHistory(prev => [
+        {
+          id: Date.now(),
+          item: data.item_name,
+          category: uiCategory,
+          co2: co2Impact > 0 ? `+${co2Impact.toFixed(2)}` : "0.00",
+          time: "Just now"
+        },
+        ...prev.slice(0, 4)
+      ]);
+
+      setChartData(prev => {
+        const newData = [...prev];
+        newData[newData.length - 1] = Number((newData[newData.length - 1] + co2Impact).toFixed(2));
+        return newData;
+      });
+
+    } catch (error) {
+      console.error("Scan failed:", error);
+      setError(error instanceof Error ? error.message : "Unknown scan error.");
     } finally {
-      setLoadingGemini(false);
+      setIsScanning(false);
     }
-  }
+  }, []);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-6">
-      <section className="rounded-lg border p-4">
-        <h1 className="text-2xl font-bold">Next.js + FastAPI Connection</h1>
-        <p className="mt-2 text-sm text-zinc-600">
-          Frontend is calling backend at <code>{endpointText}</code>
-        </p>
-      </section>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-4 md:p-8 font-sans">
+      <Header co2Diverted={stats.co2Diverted} />
 
-      <section className="rounded-lg border p-4">
-        <h2 className="text-lg font-semibold">Backend Status</h2>
-        <button
-          className="mt-3 rounded bg-black px-4 py-2 text-white"
-          type="button"
-          onClick={checkBackend}
-        >
-          Check Backend
-        </button>
-        <p className="mt-3 text-sm">Health: {health}</p>
-        <p className="text-sm">OpenCV: {opencvVersion}</p>
-      </section>
+      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* LEFT COLUMN */}
+        <section className="lg:col-span-7 flex flex-col gap-6">
+          <Scanner isScanning={isScanning} onCapture={handleCapture} />
+          {scanResult && <ScanResultCard scanResult={scanResult} />}
+        </section>
 
-      <section className="rounded-lg border p-4">
-        <h2 className="text-lg font-semibold">Gemini Prompt</h2>
-        <form className="mt-3 flex flex-col gap-3" onSubmit={handleGeminiSubmit}>
-          <textarea
-            className="min-h-28 rounded border p-2"
-            placeholder="Type a prompt for Gemini..."
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-          />
-          <button
-            className="w-fit rounded bg-black px-4 py-2 text-white disabled:opacity-60"
-            type="submit"
-            disabled={loadingGemini}
-          >
-            {loadingGemini ? "Sending..." : "Send to Gemini"}
-          </button>
-        </form>
-        <p className="mt-3 whitespace-pre-wrap text-sm">{geminiOutput}</p>
-      </section>
-
+        {/* RIGHT COLUMN */}
+        <DashboardStats 
+          stats={stats} 
+          chartData={chartData} 
+          recentHistory={recentHistory} 
+        />
+      </main>
       {error ? (
-        <section className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-700">
+        <section className="max-w-7xl mx-auto mt-6 rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-red-300">
           {error}
         </section>
       ) : null}
-    </main>
+
+      {/* Global styles for the scanner line animation */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes scan {
+          0% { transform: translateY(0); }
+          50% { transform: translateY(300px); }
+          100% { transform: translateY(0); }
+        }
+      `}} />
+    </div>
   );
 }
