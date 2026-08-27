@@ -1,14 +1,15 @@
 """
 NYC Waste Classifier - webcam scanner prototype.
 
-Opens a webcam feed with a central 400x400 targeting box. When an item is
-held steady inside the box for 1.5 seconds (or the user presses SPACE/'c'),
-the ROI is captured and sent to Gemini 2.5 Flash for classification against
+Opens a webcam feed with a central 400x400 targeting box. Pressing SPACE/'c'
+captures the ROI and sends it to Gemini 2.5 Flash for classification against
 NYC DSNY / 311 recycling rules (KA-02013). The result is printed to stdout
 and saved to classified_item.json.
 
+Manual capture only for now; auto-capture on stillness will be added later.
+
 Controls:
-    SPACE or 'c' - force an immediate manual capture
+    SPACE or 'c' - capture
     'q'          - quit
 """
 
@@ -19,7 +20,6 @@ import sys
 import time
 
 import cv2
-import numpy as np
 from PIL import Image
 from pydantic import BaseModel
 
@@ -104,7 +104,7 @@ def classify_image(pil_image: Image.Image) -> NYCWasteClassification | None:
     """
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=[pil_image],
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
@@ -135,11 +135,8 @@ def classify_image(pil_image: Image.Image) -> NYCWasteClassification | None:
 # ---------------------------------------------------------------------------
 
 ROI_SIZE = 400
-STILL_THRESHOLD_SECONDS = 1.5
-MOTION_SCORE_THRESHOLD = 8.0  # mean abs pixel diff below this counts as "still"
 
 RED = (0, 0, 255)
-YELLOW = (0, 255, 255)
 GREEN = (0, 255, 0)
 
 
@@ -157,8 +154,6 @@ def main() -> None:
         print("ERROR: could not open webcam (device index 0).")
         sys.exit(1)
 
-    prev_gray_roi = None
-    still_start_time = None
     flash_until = 0.0
 
     print("NYC Waste Classifier scanner running. Press SPACE/'c' to capture, 'q' to quit.")
@@ -173,49 +168,21 @@ def main() -> None:
             frame = cv2.flip(frame, 1)
             h, w = frame.shape[:2]
             x1, y1, x2, y2 = get_roi_bounds(w, h)
-
             roi = frame[y1:y2, x1:x2]
-            gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            gray_roi = cv2.GaussianBlur(gray_roi, (5, 5), 0)
 
             now = time.time()
-            force_capture = False
-            is_still = False
-
-            if prev_gray_roi is not None:
-                diff = cv2.absdiff(prev_gray_roi, gray_roi)
-                motion_score = float(np.mean(diff))
-                is_still = motion_score < MOTION_SCORE_THRESHOLD
-            prev_gray_roi = gray_roi
-
-            if is_still:
-                if still_start_time is None:
-                    still_start_time = now
-            else:
-                still_start_time = None
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
-            if key == 32 or key == ord("c"):
-                force_capture = True
+            triggered = key == 32 or key == ord("c")
 
-            elapsed_still = (now - still_start_time) if still_start_time else 0.0
-            triggered = force_capture or elapsed_still >= STILL_THRESHOLD_SECONDS
-
-            # Choose box color / overlay text for this frame.
-            if now < flash_until:
+            if now < flash_until or triggered:
                 box_color = GREEN
                 label = "Captured!"
-            elif triggered:
-                box_color = GREEN
-                label = "Captured!"
-            elif is_still:
-                box_color = YELLOW
-                label = f"Hold steady... {elapsed_still:.1f}s / {STILL_THRESHOLD_SECONDS:.1f}s"
             else:
                 box_color = RED
-                label = "Align item inside box"
+                label = "Align item inside box, press SPACE to capture"
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 3)
             cv2.putText(
@@ -223,16 +190,10 @@ def main() -> None:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, box_color, 2, cv2.LINE_AA,
             )
 
-            if is_still and not triggered:
-                progress_width = int(ROI_SIZE * min(elapsed_still / STILL_THRESHOLD_SECONDS, 1.0))
-                cv2.rectangle(frame, (x1, y2 + 10), (x1 + progress_width, y2 + 25), YELLOW, -1)
-                cv2.rectangle(frame, (x1, y2 + 10), (x1 + ROI_SIZE, y2 + 25), (200, 200, 200), 1)
-
             cv2.imshow("NYC Waste Classifier", frame)
 
             if triggered:
                 flash_until = time.time() + 0.4
-                still_start_time = None
 
                 rgb_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(rgb_roi)
