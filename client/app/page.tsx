@@ -8,9 +8,14 @@ import DashboardStats from "./components/DashboardStats";
 import HistoryModal from "./components/HistoryModal"; 
 import { VisionAPIResponse, ExtendedScanResult, HistoryLog, DashboardStats as StatsType } from "./types";
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+
+type AnalyzeScanResponse = VisionAPIResponse & { model?: string };
+
 export default function EcoDashboard() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ExtendedScanResult | null>(null);
+  const [error, setError] = useState<string>("");
   
   // Add modal state
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false); 
@@ -30,19 +35,27 @@ export default function EcoDashboard() {
 
   const handleCapture = useCallback(async (imageSrc: string) => {
     setIsScanning(true);
+    setError("");
     setScanResult(null);
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const data: VisionAPIResponse = {
-        item_name: "Wooden pencil",
-        material_type: "Composite (Wood, Graphite, Metal, Rubber)",
-        nyc_stream_category: "Trash / Non-Recyclable",
-        bin_color: "Black",
-        is_recyclable: false,
-        preparation_instructions: ["Dispose of directly in the regular household trash."],
-        nyc_rule_notes: "Writing utensils such as pencils and pens are made of mixed materials and are not accepted in NYC curbside recycling programs."
-      };
+      const response = await fetch(`${API_BASE_URL}/scan/analyze`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          image_base64: imageSrc,
+          model: "gemini-1.5-flash",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData: { detail?: string } = await response.json();
+        throw new Error(errorData.detail ?? "Scan request failed.");
+      }
+
+      const data: AnalyzeScanResponse = await response.json();
 
       const isRecycle = data.nyc_stream_category.toLowerCase().includes("recycl");
       const isCompost = data.nyc_stream_category.toLowerCase().includes("compost") || data.nyc_stream_category.toLowerCase().includes("organics");
@@ -78,6 +91,7 @@ export default function EcoDashboard() {
 
     } catch (error) {
       console.error("Scan failed:", error);
+      setError(error instanceof Error ? error.message : "Unknown scan error.");
     } finally {
       setIsScanning(false);
     }
@@ -100,6 +114,11 @@ export default function EcoDashboard() {
           onViewAll={() => setIsHistoryModalOpen(true)} // Open modal on click
         />
       </main>
+      {error ? (
+        <section className="max-w-7xl mx-auto mt-6 rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-red-300">
+          {error}
+        </section>
+      ) : null}
 
       {/* Mount Modal at root layout tier */}
       <HistoryModal 
